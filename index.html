@@ -177,6 +177,10 @@
       const params = new URLSearchParams(window.location.search);
       const isAdmin = params.get("admin") === ADMIN_KEY;
 
+      // تقرأ رابط الـ CSV من معامل البحث "csv" إن وجد
+      // نستخدم هذا المعامل للسماح بمشاركة الرابط مع الآخرين بحيث يظهر الجدول دون الحاجة للتخزين المحلي
+      const csvParam = params.get("csv");
+
       // خريطة الرموز بالاسم الكامل (للأسطورة)
       const SHIFT_LABELS = {
         M: "صباحي",
@@ -309,12 +313,22 @@
             dateHeaders = headers.filter((h) => isDateHeader(h));
             dataRows = rows;
             renderTable();
-            // حفظ الرابط فى التخزين المحلى حتى يراه المستخدمون الآخرون
+            // فى وضع الإدارة: نحفظ الرابط فى التخزين المحلى ونحدث الرابط فى شريط العنوان ليشمل معامل csv
             if (isAdmin) {
               try {
                 localStorage.setItem("shifts_csv_url", url);
               } catch (e) {
                 // تجاهل أخطاء التخزين
+              }
+              try {
+                // تحديث عنوان الصفحة ليشمل معامل csv بحيث يمكن مشاركته مباشرة مع الآخرين
+                const newUrl = new URL(window.location.href);
+                newUrl.searchParams.set("csv", encodeURIComponent(url));
+                // إذا كانت هناك قيمة admin فى الرابط نبقيها
+                if (isAdmin) newUrl.searchParams.set("admin", ADMIN_KEY);
+                window.history.replaceState(null, "", newUrl.toString());
+              } catch (e) {
+                // تجاهل أية أخطاء فى تحديث الرابط
               }
             }
           })
@@ -426,15 +440,25 @@
           renderTable();
         });
       })();
-      // تحميل البيانات من التخزين عند بداية الصفحة
+      // تحميل البيانات من التخزين أو من معامل البحث عند بداية الصفحة
       (function loadFromStorage() {
         try {
-          const savedUrl = localStorage.getItem("shifts_csv_url");
+          let savedUrl = null;
+          // إذا وجد معامل csv فى الرابط، نستخدمه بدلاً من التخزين المحلى
+          if (csvParam) {
+            try {
+              savedUrl = decodeURIComponent(csvParam);
+              localStorage.setItem("shifts_csv_url", savedUrl);
+            } catch (_) {
+              savedUrl = csvParam;
+            }
+          } else {
+            savedUrl = localStorage.getItem("shifts_csv_url");
+          }
           if (savedUrl) {
-            // ضبط الحقل واستخدام الرابط المحفوظ
             const input = document.getElementById("csvUrl");
             if (input) input.value = savedUrl;
-            // فى الوضع غير الإدارى، حمل الجدول تلقائياً
+            // فى الوضع غير الإدارى، نحمل الجدول مباشرة
             if (!isAdmin) {
               document.getElementById("csvUrl").value = savedUrl;
               fetchCsv();
