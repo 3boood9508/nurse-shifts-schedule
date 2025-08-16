@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>جدول شفتات التمريض</title>
+    <!--
+      نسخة محسّنة لعرض جدول الشفتات بشكل مريح للعين.
+      توفر هذه الصفحة إمكانية تغيير ألوان الشفتات باستخدام مدخلات اللون.
+    -->
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 0;
+        padding: 0;
+        background-color: #f8f9fa;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+      h1 {
+        font-size: 24px;
+        margin-bottom: 16px;
+        color: #374151;
+      }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 16px;
+        align-items: center;
+      }
+      .controls label {
+        font-size: 14px;
+        color: #374151;
+      }
+      input[type="text"] {
+        flex: 1 1 300px;
+        padding: 8px;
+        border: 1px solid #d1d5db;
+        border-radius: 4px;
+        background-color: #ffffff;
+        direction: ltr;
+      }
+      button {
+        padding: 8px 16px;
+        background-color: #2563eb;
+        color: #ffffff;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      button:hover {
+        opacity: 0.9;
+      }
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 8px;
+      }
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 13px;
+        color: #374151;
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        padding: 4px 8px;
+        border-radius: 4px;
+      }
+      .legend-color {
+        width: 16px;
+        height: 16px;
+        border-radius: 3px;
+        border: 1px solid #ccc;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background-color: #ffffff;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+      }
+      th,
+      td {
+        padding: 8px 12px;
+        border-bottom: 1px solid #f3f4f6;
+        text-align: center;
+        vertical-align: middle;
+        white-space: pre;
+        font-size: 14px;
+      }
+      th {
+        position: sticky;
+        top: 0;
+        background-color: #f9fafb;
+        font-weight: 600;
+        color: #374151;
+        z-index: 1;
+      }
+      tbody tr:nth-child(even) {
+        background-color: #f9fafb;
+      }
+      .shift {
+        display: inline-block;
+        padding: 4px 6px;
+        border-radius: 4px;
+        min-width: 40px;
+      }
+      /* ألوان افتراضية للشفتات */
+      .shift-M {
+        background-color: #fff7d0;
+        color: #92400e;
+      }
+      .shift-A {
+        background-color: #dbeafe;
+        color: #1e3a8a;
+      }
+      .shift-N {
+        background-color: #f4e8ff;
+        color: #4a148c;
+      }
+      .shift-O {
+        background-color: #f3f4f6;
+        color: #6b7280;
+        text-decoration: line-through;
+      }
+      .shift-AL {
+        background-color: #e7f6e7;
+        color: #065f46;
+        font-weight: 600;
+      }
+      .shift-SL {
+        background-color: #ffe4e6;
+        color: #991b1b;
+        font-weight: 600;
+      }
+      .error {
+        background-color: #fee2e2;
+        color: #b91c1c;
+        padding: 8px;
+        border-radius: 4px;
+        margin-bottom: 12px;
+        font-size: 14px;
+      }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  </head>
+  <body>
+    <div class="container">
+      <h1>جدول شفتات التمريض</h1>
+      <div class="controls">
+        <input
+          type="text"
+          id="csvUrl"
+          placeholder="رابط CSV منشور أو رابط تحميل مباشر"
+        />
+        <button id="loadBtn">تحميل</button>
+      </div>
+      <div id="errorContainer"></div>
+      <div class="legend" id="legendContainer"></div>
+      <div id="tableContainer" style="overflow-x:auto;"></div>
+      <!-- زر لتأكيد التعديلات على الألوان. يظهر فقط فى وضع الإدارة -->
+      <button id="confirmColorsBtn" style="margin-top: 12px;">
+        تأكيد الألوان
+      </button>
+    </div>
+    <script>
+      // مفتاح الإدارة: عدل هذا النص لتحديد كلمة سر عرض لوحة التحكم
+      const ADMIN_KEY = "admin123";
+
+      // كشف وضع الإدارة بناءً على سطر الاستعلام (?admin=admin123)
+      const params = new URLSearchParams(window.location.search);
+      const isAdmin = params.get("admin") === ADMIN_KEY;
+
+      // خريطة الرموز بالاسم الكامل (للأسطورة)
+      const SHIFT_LABELS = {
+        M: "صباحي",
+        A: "مسائي",
+        N: "ليلي",
+        O: "إجازة",
+        AL: "سنوية",
+        SL: "مرضي",
+      };
+
+      // هذه الكائنات تمثل الخلفية والنص لكل رمز. يمكن تحديثها عبر مدخلات اللون.
+      const SHIFT_COLORS = {
+        // ألوان أكثر وضوحًا للخلفية ونصوص داكنة
+        M: { bg: "#fff3cd", fg: "#664d03", strike: false, bold: false }, // صباحي
+        A: { bg: "#cfe2ff", fg: "#084298", strike: false, bold: false }, // مسائي
+        N: { bg: "#e2d5f8", fg: "#581c87", strike: false, bold: false }, // ليلي
+        O: { bg: "#e2e3e5", fg: "#495057", strike: true, bold: false },   // إجازة
+        AL: { bg: "#d1e7dd", fg: "#0f5132", strike: false, bold: true },   // سنوية
+        SL: { bg: "#f8d7da", fg: "#842029", strike: false, bold: true },   // مرضي
+      };
+
+      // تحويل قيمة HEX إلى كائن RGB
+      function hexToRgb(hex) {
+        const clean = hex.replace("#", "");
+        const bigint = parseInt(clean, 16);
+        const r = (bigint >> 16) & 255;
+        const g = (bigint >> 8) & 255;
+        const b = bigint & 255;
+        return { r, g, b };
+      }
+
+      // تحديد لون النص المناسب استنادًا إلى الخلفية (أسود أو أبيض)
+      function getContrastColor(hex) {
+        const { r, g, b } = hexToRgb(hex);
+        // تحويل إلى قيمة سطوع نسبية
+        const Y = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+        return Y > 0.6 ? "#000000" : "#ffffff";
+      }
+
+      // تهيئة ألوان النص عند بداية الصفحة
+      (function initTextColors() {
+        Object.keys(SHIFT_COLORS).forEach((code) => {
+          const bg = SHIFT_COLORS[code].bg;
+          SHIFT_COLORS[code].fg = getContrastColor(bg);
+        });
+      })();
+
+      // إنشاء الأسطورة مع مدخلات اللون
+      function renderLegend() {
+        const legend = document.getElementById("legendContainer");
+        legend.innerHTML = "";
+        // إذا لم يكن الوضع إدارة، لا نعرض الأسطورة
+        if (!isAdmin) {
+          legend.style.display = "none";
+          return;
+        }
+        legend.style.display = "flex";
+        Object.keys(SHIFT_LABELS).forEach((code) => {
+          const item = document.createElement("div");
+          item.className = "legend-item";
+          const colorBox = document.createElement("div");
+          colorBox.className = "legend-color";
+          colorBox.style.backgroundColor = SHIFT_COLORS[code].bg;
+          const label = document.createElement("span");
+          label.textContent = `${SHIFT_LABELS[code]} (${code})`;
+          item.appendChild(colorBox);
+          item.appendChild(label);
+          // فى وضع الإدارة أضف مدخل اللون
+          if (isAdmin) {
+            const input = document.createElement("input");
+            input.type = "color";
+            input.value = SHIFT_COLORS[code].bg;
+            input.style.marginLeft = "4px";
+            // عند تغيير اللون، يتم تحديث الكائن المؤقت و لون المعاينة، ولا يُعاد رسم الجدول حتى يضغط المدير زر التأكيد
+            input.addEventListener("input", (e) => {
+              const newBg = e.target.value;
+              // تحديث اللون فى الخريطة المؤقتة
+              SHIFT_COLORS[code].bg = newBg;
+              SHIFT_COLORS[code].fg = getContrastColor(newBg);
+              // تحديث صندوق اللون ليرى المستخدم التغيير مباشرة
+              colorBox.style.backgroundColor = newBg;
+            });
+            item.appendChild(input);
+          }
+          legend.appendChild(item);
+        });
+      }
+
+      // التعرف إذا كان الرأس يمثل تاريخ (YYYY-MM-DD)
+      function isDateHeader(h) {
+        return /\b\d{4}-\d{2}-\d{2}\b/.test(h);
+      }
+
+      // حفظ البيانات الحالية
+      let metaHeaders = [];
+      let dateHeaders = [];
+      let dataRows = [];
+
+      function showError(msg) {
+        const errorContainer = document.getElementById("errorContainer");
+        errorContainer.innerHTML = `<div class="error">${msg}</div>`;
+      }
+
+      function clearError() {
+        document.getElementById("errorContainer").innerHTML = "";
+      }
+
+      function fetchCsv() {
+        const url = document.getElementById("csvUrl").value.trim();
+        if (!url) {
+          showError("يرجى إدخال رابط صالح.");
+          return;
+        }
+        clearError();
+        fetch(url)
+          .then((res) => {
+            if (!res.ok) {
+              throw new Error("تعذر جلب الملف: " + res.status);
+            }
+            return res.text();
+          })
+          .then((text) => {
+            const parsed = Papa.parse(text, {
+              header: true,
+              skipEmptyLines: true,
+            });
+            const rows = parsed.data;
+            const headers = (parsed.meta.fields || []).filter((h) => h && h.trim().length > 0);
+            metaHeaders = headers.filter((h) => !isDateHeader(h));
+            dateHeaders = headers.filter((h) => isDateHeader(h));
+            dataRows = rows;
+            renderTable();
+            // حفظ الرابط فى التخزين المحلى حتى يراه المستخدمون الآخرون
+            if (isAdmin) {
+              try {
+                localStorage.setItem("shifts_csv_url", url);
+              } catch (e) {
+                // تجاهل أخطاء التخزين
+              }
+            }
+          })
+          .catch((err) => {
+            showError(err.message || "حدث خطأ غير متوقع.");
+          });
+      }
+
+      function renderTable() {
+        const container = document.getElementById("tableContainer");
+        if (!dataRows || dataRows.length === 0) {
+          container.innerHTML = "";
+          return;
+        }
+        let html = "<table><thead><tr>";
+        metaHeaders.forEach((h) => {
+          html += `<th>${h}</th>`;
+        });
+        dateHeaders.forEach((h) => {
+          html += `<th>${h}</th>`;
+        });
+        html += "</tr></thead><tbody>";
+        dataRows.forEach((row) => {
+          html += "<tr>";
+          metaHeaders.forEach((h) => {
+            html += `<td>${row[h] || ""}</td>`;
+          });
+          dateHeaders.forEach((h) => {
+            const val = (row[h] || "").toString().trim();
+            const code = val.toUpperCase();
+            const color = SHIFT_COLORS[code];
+            if (!val) {
+              html += `<td></td>`;
+            } else if (color) {
+              // لون الخلية حسب الرمز
+              const style = `background-color: ${color.bg}; color: ${color.fg};${color.strike ? ' text-decoration: line-through;' : ''}${color.bold ? ' font-weight: bold;' : ''}`;
+              html += `<td style="${style}">${val}</td>`;
+            } else {
+              html += `<td>${val}</td>`;
+            }
+          });
+          html += "</tr>";
+        });
+        html += "</tbody></table>";
+        container.innerHTML = html;
+      }
+
+      document.getElementById("loadBtn").addEventListener("click", fetchCsv);
+      // رسم الأسطورة عند تحميل الصفحة لأول مرة
+      renderLegend();
+      // فى الوضع غير الإدارى، إخفاء عناصر التحكم
+      if (!isAdmin) {
+        const controls = document.querySelector(".controls");
+        if (controls) controls.style.display = "none";
+        const legend = document.getElementById("legendContainer");
+        if (legend) legend.style.display = "none";
+      }
+
+      // زر التأكيد لتطبيق الألوان المحدثة. يظهر فقط فى وضع الإدارة.
+      (function initConfirmButton() {
+        const btn = document.getElementById("confirmColorsBtn");
+        if (!btn) return;
+        if (!isAdmin) {
+          // إخفاء الزر للمستخدمين العاديين
+          btn.style.display = "none";
+          return;
+        }
+        // عند الضغط، نعيد رسم الأسطورة والجدول لتطبيق التغييرات
+        btn.addEventListener("click", () => {
+          renderLegend();
+          renderTable();
+        });
+      })();
+      // تحميل البيانات من التخزين عند بداية الصفحة
+      (function loadFromStorage() {
+        try {
+          const savedUrl = localStorage.getItem("shifts_csv_url");
+          if (savedUrl) {
+            // ضبط الحقل واستخدام الرابط المحفوظ
+            const input = document.getElementById("csvUrl");
+            if (input) input.value = savedUrl;
+            // فى الوضع غير الإدارى، حمل الجدول تلقائياً
+            if (!isAdmin) {
+              document.getElementById("csvUrl").value = savedUrl;
+              fetchCsv();
+            }
+          }
+        } catch (e) {
+          // تجاهل أى خطأ فى التخزين
+        }
+      })();
+    </script>
+  </body>
+</html>
