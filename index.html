@@ -148,7 +148,6 @@
       const isAdmin = params.get("admin") === ADMIN_KEY;
 
       // معرّف Google Sheets (استبدله بمعرف الملف الحقيقى)
-      // استخدم معرف جدول Google Sheets الفعلي الخاص بك هنا
       const GOOGLE_SHEET_ID = "1A5hwXmy2223rY9OSp9sJRCFBIkKaKM21DOggDdKqCCU";
       /*
         قائمة الأوراق التى تمثل جداول الشهور أو الأسابيع.
@@ -157,8 +156,19 @@
         يرجى تعديل هذه القائمة لتطابق أوراقك الفعلية.
       */
       const SHEET_INFO = [
-        { sheet: "Sheet1", label: "الشهر الحالي" },
-        { sheet: "Sheet2", label: "الشهر السابق" }
+        { sheet: "January", label: "January" },
+        { sheet: "February", label: "February" }
+        { sheet: "March", label: "March" }
+        { sheet: "April", label: "April" }
+        { sheet: "May", label: "May" }
+        { sheet: "June", label: "June" }
+        { sheet: "July", label: "July" }
+        { sheet: "August", label: "August" }
+        { sheet: "September", label: "September" }
+        { sheet: "October", label: "October" }
+        { sheet: "November", label: "November" }
+        { sheet: "December", label: "December" }
+
         // يمكنك إضافة المزيد من الأوراق هنا
       ];
 
