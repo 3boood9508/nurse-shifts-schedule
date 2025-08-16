@@ -5,8 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>جدول شفتات التمريض</title>
     <!--
-      نسخة محسّنة لعرض جدول الشفتات بشكل مريح للعين.
-      توفر هذه الصفحة إمكانية تغيير ألوان الشفتات باستخدام مدخلات اللون.
+      صفحة تفاعلية لعرض جدول الشفتات مباشرة من Google Sheets.
+      يقوم الموقع بتحميل بيانات الورقة حسب اسم الورقة الموجود فى القائمة الجانبية.
+      يتم تحديث الجدول والألوان تلقائياً وفق التعديلات فى Google Sheets.
+      يمكن للمدير تعديل ألوان الرموز وحفظها من خلال زر "تأكيد الألوان".
     -->
     <style>
       body {
@@ -25,36 +27,44 @@
         margin-bottom: 16px;
         color: #374151;
       }
-      .controls {
+      /* تخطيط مرن: الشريط الجانبى على اليمين والمحتوى على اليسار (فى اتجاه RTL) */
+      .main-container {
         display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-        margin-bottom: 16px;
-        align-items: center;
+        flex-direction: row-reverse;
+        gap: 20px;
       }
-      .controls label {
-        font-size: 14px;
-        color: #374151;
-      }
-      input[type="text"] {
-        flex: 1 1 300px;
-        padding: 8px;
-        border: 1px solid #d1d5db;
-        border-radius: 4px;
+      .sidebar {
+        width: 200px;
         background-color: #ffffff;
-        direction: ltr;
-      }
-      button {
-        padding: 8px 16px;
-        background-color: #2563eb;
-        color: #ffffff;
-        border: none;
+        border: 1px solid #e5e7eb;
         border-radius: 4px;
+        padding: 12px;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+      }
+      .sidebar ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      .sidebar li {
+        padding: 8px 8px;
         cursor: pointer;
+        border-bottom: 1px solid #f3f4f6;
+        color: #374151;
         font-size: 14px;
       }
-      button:hover {
-        opacity: 0.9;
+      .sidebar li:last-child {
+        border-bottom: none;
+      }
+      .sidebar li.active {
+        background-color: #e0f2fe;
+        font-weight: bold;
+      }
+      .sidebar li:hover {
+        background-color: #f3f4f6;
+      }
+      .content-area {
+        flex: 1;
       }
       .legend {
         display: flex;
@@ -83,7 +93,7 @@
         width: 100%;
         border-collapse: collapse;
         background-color: #ffffff;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
       }
       th,
       td {
@@ -105,40 +115,6 @@
       tbody tr:nth-child(even) {
         background-color: #f9fafb;
       }
-      .shift {
-        display: inline-block;
-        padding: 4px 6px;
-        border-radius: 4px;
-        min-width: 40px;
-      }
-      /* ألوان افتراضية للشفتات */
-      .shift-M {
-        background-color: #fff7d0;
-        color: #92400e;
-      }
-      .shift-A {
-        background-color: #dbeafe;
-        color: #1e3a8a;
-      }
-      .shift-N {
-        background-color: #f4e8ff;
-        color: #4a148c;
-      }
-      .shift-O {
-        background-color: #f3f4f6;
-        color: #6b7280;
-        text-decoration: line-through;
-      }
-      .shift-AL {
-        background-color: #e7f6e7;
-        color: #065f46;
-        font-weight: 600;
-      }
-      .shift-SL {
-        background-color: #ffe4e6;
-        color: #991b1b;
-        font-weight: 600;
-      }
       .error {
         background-color: #fee2e2;
         color: #b91c1c;
@@ -153,35 +129,51 @@
   <body>
     <div class="container">
       <h1>جدول شفتات التمريض</h1>
-      <div class="controls">
-        <input
-          type="text"
-          id="csvUrl"
-          placeholder="رابط CSV منشور أو رابط تحميل مباشر"
-        />
-        <button id="loadBtn">تحميل</button>
+      <div class="main-container">
+        <div class="sidebar" id="sidebar"></div>
+        <div class="content-area">
+          <div id="errorContainer"></div>
+          <div class="legend" id="legendContainer"></div>
+          <div id="tableContainer" style="overflow-x: auto;"></div>
+          <!-- يظهر زر التأكيد فقط فى وضع الإدارة -->
+          <button id="confirmColorsBtn" style="margin-top: 12px;">تأكيد الألوان</button>
+        </div>
       </div>
-      <div id="errorContainer"></div>
-      <div class="legend" id="legendContainer"></div>
-      <div id="tableContainer" style="overflow-x:auto;"></div>
-      <!-- زر لتأكيد التعديلات على الألوان. يظهر فقط فى وضع الإدارة -->
-      <button id="confirmColorsBtn" style="margin-top: 12px;">
-        تأكيد الألوان
-      </button>
     </div>
     <script>
-      // مفتاح الإدارة: عدل هذا النص لتحديد كلمة سر عرض لوحة التحكم
+      // مفتاح الإدارة: غيّر هذه القيمة لتحديد كلمة سر لوحة التحكم
       const ADMIN_KEY = "admin123";
-
-      // كشف وضع الإدارة بناءً على سطر الاستعلام (?admin=admin123)
+      // قراءة معاملات سطر العنوان
       const params = new URLSearchParams(window.location.search);
       const isAdmin = params.get("admin") === ADMIN_KEY;
 
-      // تقرأ رابط الـ CSV من معامل البحث "csv" إن وجد
-      // نستخدم هذا المعامل للسماح بمشاركة الرابط مع الآخرين بحيث يظهر الجدول دون الحاجة للتخزين المحلي
-      const csvParam = params.get("csv");
+      // معرّف Google Sheets (استبدله بمعرف الملف الحقيقى)
+      // استخدم معرف جدول Google Sheets الفعلي الخاص بك هنا
+      const GOOGLE_SHEET_ID = "1A5hwXmy2223rY9OSp9sJRCFBIkKaKM21DOggDdKqCCU";
+      /*
+        قائمة الأوراق التى تمثل جداول الشهور أو الأسابيع.
+        كل عنصر يحتوى على اسم الورقة فى Google Sheets (sheet)
+        والتسمية التى ستظهر فى القائمة الجانبية (label).
+        يرجى تعديل هذه القائمة لتطابق أوراقك الفعلية.
+      */
+      const SHEET_INFO = [
+        { sheet: "Sheet1", label: "الشهر الحالي" },
+        { sheet: "Sheet2", label: "الشهر السابق" }
+        // يمكنك إضافة المزيد من الأوراق هنا
+      ];
 
-      // خريطة الرموز بالاسم الكامل (للأسطورة)
+      // استخراج اسم الورقة من معامل "sheet" إذا وُجد
+      let currentSheet = SHEET_INFO[0].sheet;
+      const sheetParam = params.get("sheet");
+      if (sheetParam) {
+        try {
+          currentSheet = decodeURIComponent(sheetParam);
+        } catch (e) {
+          currentSheet = sheetParam;
+        }
+      }
+
+      // تسميات الرموز
       const SHIFT_LABELS = {
         M: "صباحي",
         A: "مسائي",
@@ -191,18 +183,36 @@
         SL: "مرضي",
       };
 
-      // هذه الكائنات تمثل الخلفية والنص لكل رمز. يمكن تحديثها عبر مدخلات اللون.
+      // تعريف ألوان الرموز. يمكن تعديلها فى لوحة الإدارة.
       const SHIFT_COLORS = {
-        // ألوان أكثر وضوحًا للخلفية ونصوص داكنة
-        M: { bg: "#fff3cd", fg: "#664d03", strike: false, bold: false }, // صباحي
-        A: { bg: "#cfe2ff", fg: "#084298", strike: false, bold: false }, // مسائي
-        N: { bg: "#e2d5f8", fg: "#581c87", strike: false, bold: false }, // ليلي
-        O: { bg: "#e2e3e5", fg: "#495057", strike: true, bold: false },   // إجازة
-        AL: { bg: "#d1e7dd", fg: "#0f5132", strike: false, bold: true },   // سنوية
-        SL: { bg: "#f8d7da", fg: "#842029", strike: false, bold: true },   // مرضي
+        M: { bg: "#fff3cd", fg: "#664d03", strike: false, bold: false },
+        A: { bg: "#cfe2ff", fg: "#084298", strike: false, bold: false },
+        N: { bg: "#e2d5f8", fg: "#581c87", strike: false, bold: false },
+        O: { bg: "#e2e3e5", fg: "#495057", strike: true, bold: false },
+        AL: { bg: "#d1e7dd", fg: "#0f5132", strike: false, bold: true },
+        SL: { bg: "#f8d7da", fg: "#842029", strike: false, bold: true },
       };
 
-      // تحويل قيمة HEX إلى كائن RGB
+      // إذا تم تمرير ألوان فى معامل "colors"، نطبقها على الكائن
+      const colorsParam = params.get("colors");
+      (function applyColorsFromParam() {
+        if (!colorsParam) return;
+        try {
+          const decoded = decodeURIComponent(colorsParam);
+          const pairs = decoded.split("|");
+          pairs.forEach((pair) => {
+            const [code, color] = pair.split("-");
+            if (code && color && SHIFT_COLORS[code]) {
+              SHIFT_COLORS[code].bg = `#${color.replace(/^#/, "")}`;
+              SHIFT_COLORS[code].fg = getContrastColor(SHIFT_COLORS[code].bg);
+            }
+          });
+        } catch (e) {
+          /* تجاهل أى أخطاء فى التحليل */
+        }
+      })();
+
+      // تحويل HEX إلى RGB
       function hexToRgb(hex) {
         const clean = hex.replace("#", "");
         const bigint = parseInt(clean, 16);
@@ -211,16 +221,13 @@
         const b = bigint & 255;
         return { r, g, b };
       }
-
-      // تحديد لون النص المناسب استنادًا إلى الخلفية (أسود أو أبيض)
+      // اختيار لون النص (أسود أو أبيض) بناءً على خلفية الخلية
       function getContrastColor(hex) {
         const { r, g, b } = hexToRgb(hex);
-        // تحويل إلى قيمة سطوع نسبية
         const Y = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
         return Y > 0.6 ? "#000000" : "#ffffff";
       }
-
-      // تهيئة ألوان النص عند بداية الصفحة
+      // تهيئة ألوان النص عند البداية
       (function initTextColors() {
         Object.keys(SHIFT_COLORS).forEach((code) => {
           const bg = SHIFT_COLORS[code].bg;
@@ -228,53 +235,7 @@
         });
       })();
 
-      // إنشاء الأسطورة مع مدخلات اللون
-      function renderLegend() {
-        const legend = document.getElementById("legendContainer");
-        legend.innerHTML = "";
-        // إذا لم يكن الوضع إدارة، لا نعرض الأسطورة
-        if (!isAdmin) {
-          legend.style.display = "none";
-          return;
-        }
-        legend.style.display = "flex";
-        Object.keys(SHIFT_LABELS).forEach((code) => {
-          const item = document.createElement("div");
-          item.className = "legend-item";
-          const colorBox = document.createElement("div");
-          colorBox.className = "legend-color";
-          colorBox.style.backgroundColor = SHIFT_COLORS[code].bg;
-          const label = document.createElement("span");
-          label.textContent = `${SHIFT_LABELS[code]} (${code})`;
-          item.appendChild(colorBox);
-          item.appendChild(label);
-          // فى وضع الإدارة أضف مدخل اللون
-          if (isAdmin) {
-            const input = document.createElement("input");
-            input.type = "color";
-            input.value = SHIFT_COLORS[code].bg;
-            input.style.marginLeft = "4px";
-            // عند تغيير اللون، يتم تحديث الكائن المؤقت و لون المعاينة، ولا يُعاد رسم الجدول حتى يضغط المدير زر التأكيد
-            input.addEventListener("input", (e) => {
-              const newBg = e.target.value;
-              // تحديث اللون فى الخريطة المؤقتة
-              SHIFT_COLORS[code].bg = newBg;
-              SHIFT_COLORS[code].fg = getContrastColor(newBg);
-              // تحديث صندوق اللون ليرى المستخدم التغيير مباشرة
-              colorBox.style.backgroundColor = newBg;
-            });
-            item.appendChild(input);
-          }
-          legend.appendChild(item);
-        });
-      }
-
-      // التعرف إذا كان الرأس يمثل تاريخ (YYYY-MM-DD)
-      function isDateHeader(h) {
-        return /\b\d{4}-\d{2}-\d{2}\b/.test(h);
-      }
-
-      // حفظ البيانات الحالية
+      // تخزين عناصر الرأس والمعطيات
       let metaHeaders = [];
       let dateHeaders = [];
       let dataRows = [];
@@ -283,60 +244,43 @@
         const errorContainer = document.getElementById("errorContainer");
         errorContainer.innerHTML = `<div class="error">${msg}</div>`;
       }
-
       function clearError() {
         document.getElementById("errorContainer").innerHTML = "";
       }
 
-      function fetchCsv() {
-        const url = document.getElementById("csvUrl").value.trim();
-        if (!url) {
-          showError("يرجى إدخال رابط صالح.");
-          return;
-        }
-        clearError();
-        fetch(url)
-          .then((res) => {
-            if (!res.ok) {
-              throw new Error("تعذر جلب الملف: " + res.status);
-            }
-            return res.text();
-          })
-          .then((text) => {
-            const parsed = Papa.parse(text, {
-              header: true,
-              skipEmptyLines: true,
-            });
-            const rows = parsed.data;
-            const headers = (parsed.meta.fields || []).filter((h) => h && h.trim().length > 0);
-            metaHeaders = headers.filter((h) => !isDateHeader(h));
-            dateHeaders = headers.filter((h) => isDateHeader(h));
-            dataRows = rows;
-            renderTable();
-            // فى وضع الإدارة: نحفظ الرابط فى التخزين المحلى ونحدث الرابط فى شريط العنوان ليشمل معامل csv
-            if (isAdmin) {
-              try {
-                localStorage.setItem("shifts_csv_url", url);
-              } catch (e) {
-                // تجاهل أخطاء التخزين
-              }
-              try {
-                // تحديث عنوان الصفحة ليشمل معامل csv بحيث يمكن مشاركته مباشرة مع الآخرين
-                const newUrl = new URL(window.location.href);
-                newUrl.searchParams.set("csv", encodeURIComponent(url));
-                // إذا كانت هناك قيمة admin فى الرابط نبقيها
-                if (isAdmin) newUrl.searchParams.set("admin", ADMIN_KEY);
-                window.history.replaceState(null, "", newUrl.toString());
-              } catch (e) {
-                // تجاهل أية أخطاء فى تحديث الرابط
-              }
-            }
-          })
-          .catch((err) => {
-            showError(err.message || "حدث خطأ غير متوقع.");
-          });
+      // بناء رابط CSV للورقة المعطاة (باستخدام واجهة gviz)
+      function buildCsvUrl(sheetName) {
+        const encoded = encodeURIComponent(sheetName);
+        return `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encoded}`;
       }
 
+      // رسم القائمة الجانبية
+      function renderSidebar() {
+        const sidebar = document.getElementById("sidebar");
+        if (!sidebar) return;
+        const ul = document.createElement("ul");
+        SHEET_INFO.forEach((info) => {
+          const li = document.createElement("li");
+          li.textContent = info.label;
+          li.dataset.sheet = info.sheet;
+          if (info.sheet === currentSheet) {
+            li.classList.add("active");
+          }
+          li.addEventListener("click", () => {
+            loadSheet(info.sheet);
+          });
+          ul.appendChild(li);
+        });
+        sidebar.innerHTML = "";
+        sidebar.appendChild(ul);
+      }
+
+      // التعرف إذا كان رأس العمود يمثل تاريخ
+      function isDateHeader(h) {
+        return /\b\d{4}-\d{2}-\d{2}\b/.test(h);
+      }
+
+      // رسم الجدول
       function renderTable() {
         const container = document.getElementById("tableContainer");
         if (!dataRows || dataRows.length === 0) {
@@ -363,7 +307,6 @@
             if (!val) {
               html += `<td></td>`;
             } else if (color) {
-              // لون الخلية حسب الرمز
               const style = `background-color: ${color.bg}; color: ${color.fg};${color.strike ? ' text-decoration: line-through;' : ''}${color.bold ? ' font-weight: bold;' : ''}`;
               html += `<td style="${style}">${val}</td>`;
             } else {
@@ -376,21 +319,54 @@
         container.innerHTML = html;
       }
 
-      document.getElementById("loadBtn").addEventListener("click", fetchCsv);
-      // رسم الأسطورة عند تحميل الصفحة لأول مرة
-      renderLegend();
-      // فى الوضع غير الإدارى، إخفاء عناصر التحكم
-      if (!isAdmin) {
-        const controls = document.querySelector(".controls");
-        if (controls) controls.style.display = "none";
-        const legend = document.getElementById("legendContainer");
-        if (legend) legend.style.display = "none";
+      // تحميل بيانات الورقة من Google Sheets
+      function loadSheet(sheetName) {
+        currentSheet = sheetName;
+        renderSidebar();
+        clearError();
+        const url = buildCsvUrl(sheetName);
+        fetch(url)
+          .then((res) => {
+            if (!res.ok) throw new Error("تعذر جلب الملف: " + res.status);
+            return res.text();
+          })
+          .then((text) => {
+            const parsed = Papa.parse(text, {
+              header: true,
+              skipEmptyLines: true,
+            });
+            const rows = parsed.data;
+            const headers = (parsed.meta.fields || []).filter((h) => h && h.trim().length > 0);
+            metaHeaders = headers.filter((h) => !isDateHeader(h));
+            dateHeaders = headers.filter((h) => isDateHeader(h));
+            dataRows = rows;
+            renderTable();
+            // تخزين اسم الورقة فى التخزين المحلى
+            try {
+              localStorage.setItem("shifts_sheet", sheetName);
+            } catch (e) {
+              /* تجاهل أية أخطاء */
+            }
+            // تحديث رابط الصفحة بمعامل sheet
+            try {
+              const newUrl = new URL(window.location.href);
+              newUrl.searchParams.set("sheet", encodeURIComponent(sheetName));
+              if (isAdmin) newUrl.searchParams.set("admin", ADMIN_KEY);
+              const colorsStr = newUrl.searchParams.get("colors");
+              if (colorsStr) newUrl.searchParams.set("colors", colorsStr);
+              window.history.replaceState(null, "", newUrl.toString());
+            } catch (e) {
+              /* تجاهل */
+            }
+          })
+          .catch((err) => {
+            showError(err.message || "حدث خطأ غير متوقع.");
+          });
       }
 
-      // حفظ ألوان الشفتات فى التخزين المحلى
+      // حفظ ألوان الرموز فى التخزين المحلى
       function saveColorsToStorage() {
         try {
-          // تخزين فقط خصائص الخلفية ونمط الخط والضرب، لتقليل حجم التخزين
           const simple = {};
           Object.keys(SHIFT_COLORS).forEach((code) => {
             const c = SHIFT_COLORS[code];
@@ -398,11 +374,10 @@
           });
           localStorage.setItem("shifts_colors", JSON.stringify(simple));
         } catch (e) {
-          // تجاهل أية أخطاء فى التخزين
+          /* تجاهل */
         }
       }
-
-      // استرجاع ألوان الشفتات من التخزين المحلى (إن وجدت)
+      // تحميل ألوان الرموز من التخزين المحلى
       function loadColorsFromStorage() {
         try {
           const stored = localStorage.getItem("shifts_colors");
@@ -410,64 +385,99 @@
             const parsed = JSON.parse(stored);
             Object.keys(parsed).forEach((code) => {
               if (SHIFT_COLORS[code]) {
-                // تحديث الخلفية والسماح بضبط النص تلقائياً
                 SHIFT_COLORS[code].bg = parsed[code].bg;
                 SHIFT_COLORS[code].strike = !!parsed[code].strike;
                 SHIFT_COLORS[code].bold = !!parsed[code].bold;
-                // إعادة حساب لون النص لضمان التباين
                 SHIFT_COLORS[code].fg = getContrastColor(parsed[code].bg);
               }
             });
           }
         } catch (e) {
-          // تجاهل أية أخطاء فى التخزين
+          /* تجاهل */
         }
       }
 
-      // زر التأكيد لتطبيق الألوان المحدثة. يظهر فقط فى وضع الإدارة.
+      // رسم الأسطورة مع إمكانية تعديل الألوان فى وضع الإدارة
+      function renderLegend() {
+        const legend = document.getElementById("legendContainer");
+        legend.innerHTML = "";
+        if (!isAdmin) {
+          legend.style.display = "none";
+          return;
+        }
+        legend.style.display = "flex";
+        Object.keys(SHIFT_LABELS).forEach((code) => {
+          const item = document.createElement("div");
+          item.className = "legend-item";
+          const colorBox = document.createElement("div");
+          colorBox.className = "legend-color";
+          colorBox.style.backgroundColor = SHIFT_COLORS[code].bg;
+          const label = document.createElement("span");
+          label.textContent = `${SHIFT_LABELS[code]} (${code})`;
+          item.appendChild(colorBox);
+          item.appendChild(label);
+          if (isAdmin) {
+            const input = document.createElement("input");
+            input.type = "color";
+            input.value = SHIFT_COLORS[code].bg;
+            input.style.marginLeft = "4px";
+            input.addEventListener("input", (e) => {
+              const newBg = e.target.value;
+              SHIFT_COLORS[code].bg = newBg;
+              SHIFT_COLORS[code].fg = getContrastColor(newBg);
+              colorBox.style.backgroundColor = newBg;
+            });
+            item.appendChild(input);
+          }
+          legend.appendChild(item);
+        });
+      }
+
+      // زر التأكيد يطبق الألوان المخزنة
       (function initConfirmButton() {
         const btn = document.getElementById("confirmColorsBtn");
         if (!btn) return;
         if (!isAdmin) {
-          // إخفاء الزر للمستخدمين العاديين
+          // إخفاء الزر لغير الإدارة
           btn.style.display = "none";
           return;
         }
-        // عند الضغط، نحفظ الألوان الجديدة ونُعيد رسم الأسطورة والجدول
         btn.addEventListener("click", () => {
           saveColorsToStorage();
           renderLegend();
           renderTable();
+          // تحديث معامل colours فى الرابط
+          try {
+            const newUrl = new URL(window.location.href);
+            const colorsString = Object.keys(SHIFT_COLORS)
+              .map((code) => {
+                const c = SHIFT_COLORS[code];
+                return `${code}-${c.bg.replace(/^#/, "")}`;
+              })
+              .join("|");
+            newUrl.searchParams.set("colors", encodeURIComponent(colorsString));
+            if (isAdmin) newUrl.searchParams.set("admin", ADMIN_KEY);
+            if (currentSheet) newUrl.searchParams.set("sheet", encodeURIComponent(currentSheet));
+            window.history.replaceState(null, "", newUrl.toString());
+          } catch (e) {
+            /* تجاهل */
+          }
         });
       })();
-      // تحميل البيانات من التخزين أو من معامل البحث عند بداية الصفحة
-      (function loadFromStorage() {
+
+      // تهيئة الصفحة عند التحميل
+      (function init() {
         try {
-          let savedUrl = null;
-          // إذا وجد معامل csv فى الرابط، نستخدمه بدلاً من التخزين المحلى
-          if (csvParam) {
-            try {
-              savedUrl = decodeURIComponent(csvParam);
-              localStorage.setItem("shifts_csv_url", savedUrl);
-            } catch (_) {
-              savedUrl = csvParam;
-            }
-          } else {
-            savedUrl = localStorage.getItem("shifts_csv_url");
+          // تحميل ألوان من التخزين إن لم يمرر colours
+          if (!colorsParam) {
+            loadColorsFromStorage();
           }
-          if (savedUrl) {
-            const input = document.getElementById("csvUrl");
-            if (input) input.value = savedUrl;
-            // فى الوضع غير الإدارى، نحمل الجدول مباشرة
-            if (!isAdmin) {
-              document.getElementById("csvUrl").value = savedUrl;
-              fetchCsv();
-            }
-          }
-          // تحميل ألوان الشفتات من التخزين إن وجدت
-          loadColorsFromStorage();
+          renderLegend();
+          renderSidebar();
+          // تحميل جدول الورقة الحالية
+          loadSheet(currentSheet);
         } catch (e) {
-          // تجاهل أى خطأ فى التخزين
+          showError("حدث خطأ أثناء التهيئة.");
         }
       })();
     </script>
